@@ -19,7 +19,24 @@ def invalidCommand(cmd):
     sys.stderr.write(f"{cmd}: command not found.\n")
 
 
-# ques: how would you handle argument checking?
+def forkError():
+    sys.stderr.write("Failed to create fork...")
+
+
+# waits for child. if it has an error, it writes to stdout
+def waitForChild(pid: int):
+    exit_status = os.waitid(os.P_PID, pid, os.WEXITED)
+    exit_code = os.waitstatus_to_exitcode(exit_status.si_status)
+
+    if exit_code != 0:
+        sys.stderr.write(f"Process exited with error code: {exit_code}\n")
+
+    # TODO: add reaping here?
+
+
+# ans: should we also handle #! executables? --> no
+
+
 # I was thinking about having a dictionary of valid flags / parameters
 if __name__ == "__main__":
 
@@ -30,14 +47,6 @@ if __name__ == "__main__":
         command = command.split(" ")
 
         # shell commands
-        if command[0] == "ls":
-            if len(command) > 1:
-                invalidArgs(command[1])
-                continue
-
-            printlist(os.listdir())
-            continue
-
         if command[0] == "exit":
             if len(command) > 1:
                 invalidArgs(command[1])
@@ -57,11 +66,22 @@ if __name__ == "__main__":
             os.chdir(command[1])
             continue
 
-        # current dir executables
-        # TODO:
-
         # path commands
-        # TODO:
+        # check if the command is in the path. if so, run it, if not, raise err
+        try:
+            pid = os.fork()
 
-        # if command not matched
-        invalidCommand(command[0])
+            if pid < 0:
+                forkError()
+            elif pid == 0:
+                # child
+                os.execvpe(command[0], command, os.environ)
+            else:
+                # parent
+                waitForChild(pid)
+
+            continue
+
+        except FileNotFoundError as e:
+            invalidCommand(command[0])
+            sys.exit(1)  # if the command isnt' found, child should exit with err
