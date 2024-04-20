@@ -1,4 +1,4 @@
-import os, sys, re
+import os, sys, re, socket
 from pprint import pprint
 
 
@@ -39,10 +39,20 @@ def waitForChild(pid: int):
 
 # I was thinking about having a dictionary of valid flags / parameters
 if __name__ == "__main__":
+    
+    # set the PS1 shell variable
+    PS1 = r"\u@\h \W$ "
 
     # main loop
     while True:
-        command = input("$ ")
+        # ans: does the PS1 prompt actually have to be the system one or is it just a local config? I assumed the latter --> an actual config
+        
+        hostname = socket.gethostname()
+        username = os.getlogin()
+        working_dir = os.getcwd()
+        shell_prompt = PS1.replace(r"\u", username).replace("\h", hostname).replace("\W", working_dir) if len(PS1) > 0 else "$ "
+        command = input(shell_prompt)
+        
         command = command.strip()
         command = command.split(" ")
 
@@ -65,6 +75,20 @@ if __name__ == "__main__":
 
             os.chdir(command[1])
             continue
+        
+        # output redirection, if specified
+        temp_stdout = -1
+        out_file_path = ""
+        if '>' in command:
+            redirect_idx = command.index('>')
+            out_file_path = command[redirect_idx + 1] if redirect_idx + 1 < len(command) else ""
+            
+            if out_file_path:
+                temp_stdout = os.dup(1)
+                os.close(1)
+                fd = os.open(out_file_path, os.O_WRONLY | os.O_CREAT)
+                os.set_inheritable(fd, True)
+                command = command[:redirect_idx]
 
         # path commands
         # check if the command is in the path. if so, run it, if not, raise err
@@ -80,8 +104,15 @@ if __name__ == "__main__":
                 # parent
                 waitForChild(pid)
 
-            continue
-
         except FileNotFoundError as e:
             invalidCommand(command[0])
             sys.exit(1)  # if the command isnt' found, child should exit with err
+        
+        
+        # remove output redirection, if opened before
+        if out_file_path:
+            os.close(1)
+            os.dup(temp_stdout)
+            os.close(temp_stdout)
+            
+        
