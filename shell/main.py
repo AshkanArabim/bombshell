@@ -54,7 +54,7 @@ if __name__ == "__main__":
         command = input(shell_prompt)
         
         command = command.strip()
-        command = command.split(" ")
+        command = [word for word in command.split(" ") if len(word) > 0]
 
         # shell commands
         if command[0] == "exit":
@@ -76,19 +76,35 @@ if __name__ == "__main__":
             os.chdir(command[1])
             continue
         
+        command_chop_positions = []
+        
         # output redirection, if specified
-        temp_stdout = -1
-        out_file_path = ""
-        if '>' in command:
-            redirect_idx = command.index('>')
-            out_file_path = command[redirect_idx + 1] if redirect_idx + 1 < len(command) else ""
+        out_redirect_idxs = [i for i, e in enumerate(command) if e == ">"]
+        if out_redirect_idxs: # if it's not empty
+            out_redirect_idx = out_redirect_idxs[0]
+            out_file_path = command[out_redirect_idx + 1] if out_redirect_idx + 1 < len(command) else ""
             
-            if out_file_path:
-                temp_stdout = os.dup(1)
-                os.close(1)
-                fd = os.open(out_file_path, os.O_WRONLY | os.O_CREAT)
-                os.set_inheritable(fd, True)
-                command = command[:redirect_idx]
+            temp_stdout = os.dup(1)
+            os.close(1)
+            fd = os.open(out_file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            os.set_inheritable(fd, True)
+            command_chop_positions.append(out_redirect_idx)
+        
+        # input redirection, if specified
+        in_redirect_idxs = [i for i, e in enumerate(command) if e == "<"]
+        if in_redirect_idxs: # if it's not empty
+            in_redirect_idx = in_redirect_idxs[0]
+            in_file_path = command[in_redirect_idx + 1] if in_redirect_idx + 1 < len(command) else ""
+            
+            temp_stdin = os.dup(0)
+            os.close(0)
+            fd = os.open(in_file_path, os.O_RDONLY)
+            os.set_inheritable(fd, True)
+            command_chop_positions.append(in_redirect_idx)
+        
+        # chop of the redirection part of the command
+        if command_chop_positions:
+            command = command[:min(command_chop_positions)]
 
         # path commands
         # check if the command is in the path. if so, run it, if not, raise err
@@ -109,10 +125,18 @@ if __name__ == "__main__":
             sys.exit(1)  # if the command isnt' found, child should exit with err
         
         
-        # remove output redirection, if opened before
-        if out_file_path:
+        # remove output redirection, if used before
+        if out_redirect_idxs:
             os.close(1)
-            os.dup(temp_stdout)
+            fd = os.dup(temp_stdout)
+            os.set_inheritable(fd, True)
             os.close(temp_stdout)
-            
+        
+        # remove input redirection, if used before
+        # TODO: 
+        if in_redirect_idxs:
+            os.close(0)
+            fd = os.dup(temp_stdin)
+            os.set_inheritable(fd, True)
+            os.close(temp_stdin)
         
