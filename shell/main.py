@@ -115,7 +115,10 @@ if __name__ == "__main__":
                 forkError()
             elif pid == 0:
                 # child
-                os.execvpe(command[0], command, os.environ)
+                if command[0][:2] == "./":
+                    os.execvp(command[0], command)
+                else:
+                    os.execvpe(command[0], command, os.environ)
             else:
                 # parent
                 waitForChild(pid)
