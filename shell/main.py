@@ -63,6 +63,8 @@ def handle_command(command: str, fd0 = None, fd1 = None, fd2=None):
     temp_stdout = None
     temp_stderr = None
     
+    # < and > take higher priority than pipe
+    
     # input redirection, if specified
     in_redirect_idxs = [i for i, e in enumerate(command) if e == "<"]
     if in_redirect_idxs: # if it's not empty
@@ -79,7 +81,8 @@ def handle_command(command: str, fd0 = None, fd1 = None, fd2=None):
         # input redirection through custom fd0
         temp_stdin = os.dup(0)
         os.close(0)
-        os.dup(fd0)
+        fd = os.dup(fd0)
+        os.set_inheritable(fd, True)
     
     # output redirection, if specified
     out_redirect_idxs = [i for i, e in enumerate(command) if e == ">"]
@@ -97,13 +100,15 @@ def handle_command(command: str, fd0 = None, fd1 = None, fd2=None):
         # output redirection through custom fd1
         temp_stdout = os.dup(1)
         os.close(1)
-        os.dup(fd1)
+        fd = os.dup(fd1)
+        os.set_inheritable(fd, True)
         
     # TODO: stderr redirection, if specified 
     if fd2 != None:
         temp_stderr = os.dup(2)
         os.close(2)
-        os.dup(fd2)
+        fd = os.dup(fd2)
+        os.set_inheritable(fd, True)
     
     # chop of the redirection part of the command
     if command_chop_positions:
@@ -122,9 +127,6 @@ def handle_command(command: str, fd0 = None, fd1 = None, fd2=None):
                 os.execvp(command[0], command)
             else:
                 os.execvpe(command[0], command, os.environ)
-        else:
-            # parent
-            waitForChild(pid)
 
     except FileNotFoundError as e:
         invalidCommand(command[0])
@@ -151,6 +153,8 @@ def handle_command(command: str, fd0 = None, fd1 = None, fd2=None):
         fd = os.dup(temp_stderr)
         os.set_inheritable(fd, True)
         os.close(temp_stderr)
+    
+    return pid
 
 
 # I was thinking about having a dictionary of valid flags / parameters
@@ -169,5 +173,34 @@ if __name__ == "__main__":
         working_dir = os.getcwd()
         shell_prompt = PS1.replace(r"\u", username).replace("\h", hostname).replace("\W", working_dir) if len(PS1) > 0 else "$ "
         command = input(shell_prompt)
-
-        handle_command(command)
+        
+        # split commands in pipe sequence (if pipes exist)
+        pipe_commands = command.split(r"|")
+        
+        if len(pipe_commands) < 2:
+            # no pipes exist
+            pid = handle_command(pipe_commands[0])
+            waitForChild(pid)
+        else:
+            pids = []
+            last_out, first_in = os.pipe()
+            
+            # handle first command in pipe seq
+            pids.append(handle_command(pipe_commands[0], fd1=first_in))
+            os.close(first_in)
+            
+            # all middle commands in pipe seq
+            for command in pipe_commands[1:-1]:
+                out_to_use = last_out
+                last_out, in_to_use = os.pipe()
+                pids.append(handle_command(command, fd0=out_to_use, fd1=in_to_use))
+                os.close(out_to_use)
+                os.close(in_to_use)
+            
+            # last command in pipe seq
+            pids.append(handle_command(pipe_commands[-1], fd0=last_out))
+            os.close(last_out)
+            
+            # wait for all pipe parts to finish...
+            for pid in pids:
+                waitForChild(pid)
