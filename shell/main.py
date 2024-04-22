@@ -21,6 +21,10 @@ def invalidCommand(cmd):
 
 def forkError():
     sys.stderr.write("Failed to create fork...")
+    
+
+def run_in_bg_message(command: str, pid: int):
+    run_in_bg_message(command, pid)
 
 
 # waits for child. if it has an error, it writes to stdout
@@ -174,13 +178,21 @@ if __name__ == "__main__":
         shell_prompt = PS1.replace(r"\u", username).replace("\h", hostname).replace("\W", working_dir) if len(PS1) > 0 else "$ "
         command = input(shell_prompt)
         
+        # check if it should be running in the backgound. if so, remove '&' from command
+        run_in_bg = command.strip()[-1] == '&'
+        if run_in_bg: command = command[:-1]
+        
         # split commands in pipe sequence (if pipes exist)
         pipe_commands = command.split(r"|")
         
         if len(pipe_commands) < 2:
             # no pipes exist
             pid = handle_command(pipe_commands[0])
-            waitForChild(pid)
+            
+            if run_in_bg:
+                run_in_bg_message(command, pid)
+            else:
+                waitForChild(pid)
         else:
             pids = []
             last_out, first_in = os.pipe()
@@ -202,5 +214,8 @@ if __name__ == "__main__":
             os.close(last_out)
             
             # wait for all pipe parts to finish...
-            for pid in pids:
-                waitForChild(pid)
+            if run_in_bg:
+                run_in_bg_message(command, pid)
+            else:
+                for pid in pids:
+                    waitForChild(pid)
